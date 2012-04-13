@@ -4,6 +4,7 @@ from django.conf.urls.defaults import patterns, url
 from social_auth.views import auth, complete, associate, associate_complete, \
                               disconnect
 
+from social_auth.backends.contrib.email import EmailAuthView
 
 urlpatterns = patterns('',
     # authentication
@@ -23,4 +24,9 @@ urlpatterns = patterns('',
         name='socialauth_disconnect'),
     url(r'^disconnect/(?P<backend>[^/]+)/(?P<association_id>[^/]+)/$',
         disconnect, name='socialauth_disconnect_individual'),
+                       
+    # testing
+    url(r'^email-auth/$',
+        EmailAuthView, name='email-auth'),
+
 )
