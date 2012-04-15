@@ -4,7 +4,7 @@ from django.conf.urls.defaults import patterns, url
 from social_auth.views import auth, complete, associate, associate_complete, \
                               disconnect
 
-from social_auth.backends.contrib.email import EmailAuthView
+from social_auth.backends.contrib.email import EmailAuthView, EmailAuthPassword
 
 urlpatterns = patterns('',
     # authentication
@@ -28,5 +28,7 @@ urlpatterns = patterns('',
     # testing
     url(r'^email-auth/$',
         EmailAuthView, name='email-auth'),
-
+    url(r'^email-auth/passwd/$',
+        EmailAuthPassword, name='email-passwd'),
+    
 )
