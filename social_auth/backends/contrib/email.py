@@ -34,25 +34,16 @@ from django.forms.util import ErrorList
 
 from social_auth.signals import socialauth_registered
 from social_auth.utils import settings
+
 from django.contrib.sites.models import Site
+
+
 
 EMAIL_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_EMAIL_TEMPLATE','')
 EMAIL_VIEW_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_TEMPLATE','')
 
-# this stores user password to user object
-def new_users_handler(sender, user, response, details, **kwargs):
-    user.set_password(response['password'])
-    user.save()
-    try:
-        Nonce.objects.get(server_url=user.email)
-    except Nonce.DoesNotExist:
-        pass
-    return True
 
-## register signal only if EmailBackend is activated
-backends = setting('AUTHENTICATION_BACKENDS',{})
-if 'social_auth.backends.contrib.email.EmailBackend' in backends:
-    socialauth_registered.connect(new_users_handler, sender=None)
+
    
 
 class EmailBackend(SocialAuthBackend):
@@ -88,6 +79,21 @@ class EmailBackend(SocialAuthBackend):
                 'first_name': response.get('name')}
 
 
+# this stores user password to user object
+def new_users_handler(sender, user, response, details, **kwargs):
+    user.set_password(response['password'])
+    user.save()
+    try:
+        Nonce.objects.get(server_url=user.email)
+    except Nonce.DoesNotExist:
+        pass
+    return True
+
+## register signal only if EmailBackend is activated
+backends = setting('AUTHENTICATION_BACKENDS',{})
+if 'social_auth.backends.contrib.email.EmailBackend' in backends:
+    socialauth_registered.connect(new_users_handler, sender=EmailBackend)
+    
 class SocialAuthEmailForm(Form):
     social_auth_email = EmailField(max_length=50)
     social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False), required=False) 
