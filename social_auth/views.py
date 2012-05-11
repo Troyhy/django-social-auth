@@ -16,6 +16,7 @@ from django.contrib import messages
 from django.utils.importlib import import_module
 from django.views.decorators.csrf import csrf_exempt
 
+from urllib import urlencode
 from social_auth.backends import get_backend
 from social_auth.utils import sanitize_redirect, setting, log, \
                               backend_setting, clean_partial_pipeline
@@ -142,7 +143,7 @@ def auth_process(request, backend):
     clean_partial_pipeline(request)
 
     if backend.uses_redirect:
-        return HttpResponseRedirect(backend.auth_url())
+        return HttpResponseRedirect(backend.auth_url()+'?'+urlencode(request.GET))
     else:
         return HttpResponse(backend.auth_html(),
                             content_type='text/html;charset=UTF-8')

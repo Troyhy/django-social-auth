@@ -21,7 +21,7 @@ from django.shortcuts import render, redirect
 from social_auth.models import Nonce
 from django.contrib.auth.models import User
 
-from django.forms import EmailField, CharField,PasswordInput, Form
+from django.forms import EmailField, CharField,PasswordInput, Form, ValidationError
 
 from django.template.loader import render_to_string
 from social_auth.models import Nonce
@@ -37,10 +37,17 @@ from social_auth.utils import settings
 
 from django.contrib.sites.models import Site
 
+from django.core.mail import send_mail
+
+
 
 
 EMAIL_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_EMAIL_TEMPLATE','')
+EMAIL_SUBJECT_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_EMAIL_SUBJECT_TEMPLATE','')
+EMAIL_FROM = setting('SOCIAL_AUTH_TOKEN_EMAIL_FROM','noreply@example.com') 
 EMAIL_VIEW_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_TEMPLATE','')
+
+DEBUG = setting('DEBUG','False')
 
 
 
@@ -98,8 +105,36 @@ class SocialAuthEmailForm(Form):
     social_auth_email = EmailField(max_length=50)
     social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False), required=False) 
 
+class SocialAuthNewEmailForm(Form):
+    social_auth_email = EmailField(label=u'Sähköpostiosoite', max_length=50)
+    
+     # possible other intresting parts here
+
+    def clean_social_auth_email(self):
+        try:
+            User.objects.get(email=self.cleaned_data['social_auth_email'])
+        except User.DoesNotExist:
+            return self.cleaned_data['social_auth_email']
+        else:
+            raise ValidationError(u'Sähköpostiosoite on jo käytössä, '
+                                  u'Kirjaudu sisään käyttämällä salasanaa')
+    
 class SocialAuthAskPasswordForm(Form):
-    social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False), required=False) 
+    fisrt_name = CharField(label=u'Etunimi', max_length=20)
+    last_name = CharField(label=u'Sukunimi', max_length=30)
+    social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False)) 
+    social_auth_passwd2 = CharField(label=u'Salasana2',widget=PasswordInput(render_value=False)) 
+    
+    def clean(self):
+        cleaned_data = super(SocialAuthAskPasswordForm, self).clean()
+        passwd1 = cleaned_data.get('social_auth_passwd')
+        passwd2 = cleaned_data.get('social_auth_passwd2')
+        
+        if passwd1 != passwd2:
+            msg = u"Salasanakentät eivät täsmää!"
+            self._errors["social_auth_passwd2"] = self.error_class([msg])
+            del cleaned_data['social_auth_passwd2']
+        return cleaned_data  
     
 def EmailAuthPassword(req):
     form = SocialAuthAskPasswordForm(req.POST or None)
@@ -119,15 +154,24 @@ def EmailAuthPassword(req):
                     'ask_password':True})
     return render(req,EMAIL_VIEW_TEMPLATE,context)
 
-def EmailAuthView(req):
-    form = SocialAuthEmailForm(req.POST or None)
+def EmailAuthView(req):    
     context = {}
+    create_new_account = 'create_new_account' in req.GET 
+    context.update({'create_new_account':create_new_account})
+    
+    if create_new_account:
+        form = SocialAuthNewEmailForm(req.POST or None)
+    else:
+        form = SocialAuthEmailForm(req.POST or None)
+        
     if form.is_valid():
         email = form.cleaned_data['social_auth_email']
-        passwd = form.cleaned_data['social_auth_passwd']
-        
+        passwd = ''
+        if 'social_auth_passwd' in form.cleaned_data:
+            passwd = form.cleaned_data['social_auth_passwd']
+       
         ## password given, try to match against user password
-        if len(passwd) != 0:
+        if not create_new_account:
             try:
                 user = User.objects.get(email=email)
             except User.DoesNotExist:
@@ -147,27 +191,29 @@ def EmailAuthView(req):
             req.session['social_auth_email_passwd'] = passwd 
             req.session['social_auth_email_email'] = email
             return redirect(url)
-      
-        (item, created) = Nonce.objects.get_or_create(server_url=email,\
-                                                      defaults={'timestamp': int(time())})
-        if item.timestamp - int(time()) > (24 * 60 *60):
-            created = True; # renew this token
-        if created:
-            real_salt=setting('SECRET_KEY','add more salt')
-            item.salt = md5(real_salt + email +str(int(time()))).hexdigest()
-            item.timestamp = int(time())
-            item.save()
+        
+        else:     
+            (item, created) = Nonce.objects.get_or_create(server_url=email,\
+                                                          defaults={'timestamp': int(time())})
+            if item.timestamp - int(time()) > (24 * 60 *60):
+                created = True; # renew this token
+            if created:
+                real_salt=setting('SECRET_KEY','add more salt')
+                item.salt = md5(real_salt + email +str(int(time()))).hexdigest()
+                item.timestamp = int(time())
+                item.save()
+                
+            args = {'token':item.salt}
+            url = 'http://%s%s'%( Site.objects.get_current(),\
+                                  reverse('socialauth_complete',\
+                                          kwargs={'backend':'email'})+'?'+urlencode(args))
             
-        args = {'token':item.salt}
-        url = 'http://%s%s'%( Site.objects.get_current(),\
-                              reverse('socialauth_complete',\
-                                      kwargs={'backend':'email'})+'?'+urlencode(args))
-        
-        rendered = render_to_string(EMAIL_TEMPLATE, { 'auth_url': url })
-        
-        print('url:%s'%url)
+            rendered = render_to_string(EMAIL_TEMPLATE, { 'auth_url': url })
+            subject =  render_to_string(EMAIL_SUBJECT_TEMPLATE, { 'auth_url': url })
+            send_mail(subject, rendered , EMAIL_FROM,[email], fail_silently=False)
+            if DEBUG:
+                print('url:%s'%url)
 
-        #send_email to form.cleaned_data['social_auth_email']
     else:
         context.update({'form':form})
 
