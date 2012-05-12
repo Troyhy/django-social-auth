@@ -24,11 +24,5 @@ urlpatterns = patterns('',
         name='socialauth_disconnect'),
     url(r'^disconnect/(?P<backend>[^/]+)/(?P<association_id>[^/]+)/$',
         disconnect, name='socialauth_disconnect_individual'),
-                       
-    # testing
-    url(r'^email-auth/$',
-        EmailAuthView, name='email-auth'),
-    url(r'^email-auth/passwd/$',
-        EmailAuthPassword, name='email-passwd'),
     
 )

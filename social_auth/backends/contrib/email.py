@@ -223,11 +223,8 @@ class EmailAuth(BaseAuth):
     """E-mail Auth mechanism"""
     AUTH_BACKEND = EmailBackend
     
-    
-
-    def auth_url(self):
-        """Returns redirect url"""
-        return u'/email-auth/'
+    def auth_html(self,req, *args, **kwargs):
+        return EmailAuthView(req, *args, **kwargs)
 
     def auth_complete(self, *args, **kwargs):
         """Returns user, might be logged in"""
@@ -238,9 +235,8 @@ class EmailAuth(BaseAuth):
         if not kwargs['request'].session.get('social_auth_email_passwd'):
             # password not in session, request new password
             kwargs['request'].session['social_auth_email_token'] = self.data['token']
-            url = reverse('email-passwd')+'?'+urlencode({'token':self.data['token']})
-            return redirect(url)
-        
+            return EmailAuthPassword(req, *args, **kwargs)
+              
         if self.data.get('with_passwd'):
             self.data.get('with_passwd')
             data = {'email': kwargs['request'].session.get('social_auth_email_email'),
@@ -275,7 +271,13 @@ class EmailAuth(BaseAuth):
             return data
         except ValueError:
             return None
-
+    
+    @property
+    def uses_redirect(self):
+        """Return True if this provider uses redirect url method,
+        otherwise return false."""
+        return False
+    
     @classmethod
     def enabled(cls):
         """Return backend enabled status by checking basic settings"""
