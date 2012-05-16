@@ -235,7 +235,8 @@ class EmailAuth(BaseAuth):
         if not kwargs['request'].session.get('social_auth_email_passwd'):
             # password not in session, request new password
             kwargs['request'].session['social_auth_email_token'] = self.data['token']
-            return EmailAuthPassword(req, *args, **kwargs)
+            req=kwargs['request']
+            return EmailAuthPassword(req)
               
         if self.data.get('with_passwd'):
             self.data.get('with_passwd')
