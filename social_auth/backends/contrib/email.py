@@ -38,8 +38,10 @@ from social_auth.utils import settings
 from django.contrib.sites.models import Site
 
 from django.core.mail import send_mail
+from django.forms.fields import BooleanField, ChoiceField
 
-
+## spagetti!!!
+from promo2.utils import random_face_url
 
 
 EMAIL_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_EMAIL_TEMPLATE','')
@@ -88,10 +90,16 @@ class EmailBackend(SocialAuthBackend):
 
 # this stores user password to user object
 def new_users_handler(sender, user, response, details, **kwargs):
-    user.set_password(response['password'])
+    user.set_password(response['passwd'])
+    user.first_name= response.get('first_name','Anon')
+    user.last_name=  response.get('last_name','Ymouns') 
     user.save()
+    profile = user.get_profile()
+    profile.gender = response.get('gender','a')
+    profile.picture_link= random_face_url(profile.gender)
+    profile.save()
     try:
-        Nonce.objects.get(server_url=user.email)
+        Nonce.objects.get(server_url=user.email).delete()
     except Nonce.DoesNotExist:
         pass
     return True
@@ -118,22 +126,30 @@ class SocialAuthNewEmailForm(Form):
         else:
             raise ValidationError(u'Sähköpostiosoite on jo käytössä, '
                                   u'Kirjaudu sisään käyttämällä salasanaa')
-    
+GENDER = (
+    ('m', 'Mies'),
+    ('f', 'Nainen'),
+)   
 class SocialAuthAskPasswordForm(Form):
-    fisrt_name = CharField(label=u'Etunimi', max_length=20)
+    first_name = CharField(label=u'Etunimi', max_length=20)
     last_name = CharField(label=u'Sukunimi', max_length=30)
+    gender = ChoiceField(label=u'Sukupuoli', choices=GENDER)
+    
     social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False)) 
     social_auth_passwd2 = CharField(label=u'Salasana2',widget=PasswordInput(render_value=False)) 
     
     def clean(self):
         cleaned_data = super(SocialAuthAskPasswordForm, self).clean()
         passwd1 = cleaned_data.get('social_auth_passwd')
-        passwd2 = cleaned_data.get('social_auth_passwd2')
+        passwd2 = cleaned_data.get('social_auth_passwd2' )
         
         if passwd1 != passwd2:
             msg = u"Salasanakentät eivät täsmää!"
             self._errors["social_auth_passwd2"] = self.error_class([msg])
-            del cleaned_data['social_auth_passwd2']
+            try:
+                del cleaned_data['social_auth_passwd2']
+            except:
+                pass
         return cleaned_data  
     
 def EmailAuthPassword(req):
@@ -146,7 +162,7 @@ def EmailAuthPassword(req):
         # save aditional info for later use
         for field in req.POST:
             if field is not 'csrfmiddlewaretoken':
-                req.session[field]= req.POST[field]
+                req.session['social_auth_email_'+str(field)]= req.POST[field]
         
         return redirect(url)
     
@@ -203,6 +219,7 @@ def EmailAuthView(req):
                 item.timestamp = int(time())
                 item.save()
                 
+            context.update({'email':email})   
             args = {'token':item.salt}
             url = 'http://%s%s'%( Site.objects.get_current(),\
                                   reverse('socialauth_complete',\
@@ -218,21 +235,36 @@ def EmailAuthView(req):
         context.update({'form':form})
 
     return render(req,EMAIL_VIEW_TEMPLATE,context)
-    
+
+EMAIL_AUTH_FIELDS =['passwd' ,'first_name','last_name','gender']
+
 class EmailAuth(BaseAuth):
     """E-mail Auth mechanism"""
     AUTH_BACKEND = EmailBackend
     
     def auth_html(self,req, *args, **kwargs):
+        for field in EMAIL_AUTH_FIELDS:
+            try: # clear previous try
+                del req.session['social_auth_email'+field]
+            except:
+                pass  
         return EmailAuthView(req, *args, **kwargs)
 
     def auth_complete(self, *args, **kwargs):
         """Returns user, might be logged in"""
+        req = kwargs['request']
+        item = None
+        
         if 'token' not in self.data and 'with_passwd' not in self.data:
             error = self.data.get('error') or 'unknown error'
             raise AuthFailed(self, error)
         
-        if not kwargs['request'].session.get('social_auth_email_passwd'):
+        try:
+            item = Nonce.objects.get(salt=self.data['token'])
+        except Nonce.DoesNotExist as e:
+            raise AuthFailed(self, e)
+            
+        if not req.session.get('social_auth_email_passwd'):
             # password not in session, request new password
             kwargs['request'].session['social_auth_email_token'] = self.data['token']
             req=kwargs['request']
@@ -240,19 +272,22 @@ class EmailAuth(BaseAuth):
               
         if self.data.get('with_passwd'):
             self.data.get('with_passwd')
-            data = {'email': kwargs['request'].session.get('social_auth_email_email'),
-                    'passwd': kwargs['request'].session.get('social_auth_email_passwd')
+            data = {'email': req.session.get('social_auth_email_email'),
+                    'passwd': req.session.get('social_auth_email_passwd'),
+                    'first_name': req.session.get('social_auth_email_first_name','Ano'),
+                    'last_name': req.session.get('social_auth_email_last_name','Nymous'),
+                    'gender': req.session.get('social_auth_email_gender', 'a'),
                     }
-        else:
-            try:
-                item = Nonce.objects.get(salt=self.data['token'])
-            except Nonce.DoesNotExist as e:
-                raise AuthFailed(self, e)
-            
-            
-            data = {'email':item.server_url,
-                    'password':kwargs['request'].session.get('social_auth_email_passwd'),}
-            if data is not None:
+        else:   
+    
+            data = {'email': item.server_url,
+                    'passwd': req.session.get('social_auth_email_passwd'),
+                    'first_name': req.session.get('social_auth_email_first_name','Ano'),
+                    'last_name': req.session.get('social_auth_email_last_name','Nymous'),
+                    'gender': req.session.get('social_auth_email_gender', 'a'),
+                    }
+           
+            if data is not None: #there cannot be error, left here for reference
                 if 'error' in data:
                     error = self.data.get('error') or 'unknown error'
                     raise AuthFailed(self, error)
