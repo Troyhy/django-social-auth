@@ -89,10 +89,11 @@ class EmailBackend(SocialAuthBackend):
 
 
 # this stores user password to user object
+# this should be decoupled from here to application.. 
 def new_users_handler(sender, user, response, details, **kwargs):
     user.set_password(response['passwd'])
     user.first_name= response.get('first_name','Anon')
-    user.last_name=  response.get('last_name','Ymouns') 
+    user.last_name=  response.get('last_name','Ymous') 
     user.save()
     profile = user.get_profile()
     profile.gender = response.get('gender','a')
@@ -259,10 +260,11 @@ class EmailAuth(BaseAuth):
             error = self.data.get('error') or 'unknown error'
             raise AuthFailed(self, error)
         
-        try:
-            item = Nonce.objects.get(salt=self.data['token'])
-        except Nonce.DoesNotExist as e:
-            raise AuthFailed(self, e)
+        if 'token' in self.data:
+            try:
+                item = Nonce.objects.get(salt=self.data['token'])
+            except Nonce.DoesNotExist as e:
+                raise AuthFailed(self, e)
             
         if not req.session.get('social_auth_email_passwd'):
             # password not in session, request new password
