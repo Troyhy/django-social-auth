@@ -299,9 +299,13 @@ class EmailAuth(BaseAuth):
                     'last_name': req.session.get('social_auth_email_last_name','Nymous'),
                     'gender': req.session.get('social_auth_email_gender', 'a'),
                     'hometown': req.session.get('social_auth_email_hometown', ''),
-                    
                     }
-           
+            
+            for keys,value in MUNICIPALITY_CHOICES:
+               if keys == data['hometown']:
+                   data['hometown'] = value
+                   break
+                   
             if data is not None: #there cannot be error, left here for reference
                 if 'error' in data:
                     error = self.data.get('error') or 'unknown error'
