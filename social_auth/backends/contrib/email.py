@@ -98,6 +98,9 @@ def new_users_handler(sender, user, response, details, **kwargs):
     profile = user.get_profile()
     profile.gender = response.get('gender','a')
     profile.picture_link= random_face_url(profile.gender)
+    if response.get('hometown','') != '':
+        profile.hometown = response.get('hometown','')
+    
     profile.save()
     try:
         Nonce.objects.get(server_url=user.email).delete()
@@ -130,11 +133,19 @@ class SocialAuthNewEmailForm(Form):
 GENDER = (
     ('m', 'Mies'),
     ('f', 'Nainen'),
-)   
+)  
+
+
+
+from django.contrib.localflavor.fi.forms import FIMunicipalitySelect
+from django.contrib.localflavor.fi.fi_municipalities import MUNICIPALITY_CHOICES
+MUNICIPALITY_EMPTY = [('','Valitse Paikkakunta')] +list( MUNICIPALITY_CHOICES)
 class SocialAuthAskPasswordForm(Form):
     first_name = CharField(label=u'Etunimi', max_length=20)
     last_name = CharField(label=u'Sukunimi', max_length=30)
     gender = ChoiceField(label=u'Sukupuoli', choices=GENDER)
+    hometown = ChoiceField(label=u'Paikkakunta', choices=MUNICIPALITY_EMPTY, required=False )
+   
     
     social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False)) 
     social_auth_passwd2 = CharField(label=u'Salasana2',widget=PasswordInput(render_value=False)) 
@@ -287,6 +298,8 @@ class EmailAuth(BaseAuth):
                     'first_name': req.session.get('social_auth_email_first_name','Ano'),
                     'last_name': req.session.get('social_auth_email_last_name','Nymous'),
                     'gender': req.session.get('social_auth_email_gender', 'a'),
+                    'hometown': req.session.get('social_auth_email_hometown', ''),
+                    
                     }
            
             if data is not None: #there cannot be error, left here for reference
