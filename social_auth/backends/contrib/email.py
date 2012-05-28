@@ -13,12 +13,14 @@ from social_auth.utils import setting
 from social_auth.backends import BaseAuth, SocialAuthBackend, USERNAME
 from social_auth.backends.exceptions import AuthFailed
 
+from social_auth.models import UserSocialAuth
+ 
 from django.http import HttpResponseRedirect, HttpResponse, \
                         HttpResponseServerError
 from django.core.urlresolvers import reverse
 from django.shortcuts import render, redirect
 
-from social_auth.models import Nonce
+
 from django.contrib.auth.models import User
 
 from django.forms import EmailField, CharField,PasswordInput, Form, ValidationError
@@ -49,9 +51,19 @@ EMAIL_SUBJECT_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_EMAIL_SUBJECT_TEMPLATE','')
 EMAIL_FROM = setting('SOCIAL_AUTH_TOKEN_EMAIL_FROM','noreply@example.com') 
 EMAIL_VIEW_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_TEMPLATE','')
 
+EMAIL_AUTH_FIELDS =['passwd', 'email' ,'first_name','last_name','gender','hometown']
+
+
 DEBUG = setting('DEBUG','False')
 
-
+ # generate password
+def create_password(raw_password):
+    from django.contrib.auth.models import get_hexdigest
+    import random
+    algo = 'sha1'
+    salt = get_hexdigest(algo, str(random.random()), str(random.random()))[:5]
+    hsh = get_hexdigest(algo, salt, raw_password)
+    return '%s$%s$%s' % (algo, salt, hsh)
 
    
 
@@ -60,9 +72,7 @@ class EmailBackend(SocialAuthBackend):
     name = 'email'
     # Default extra data to store
     EXTRA_DATA = [
-        ('id', 'id'),
-        ('passwd', 'passwd'),
-        ('expires', setting('SOCIAL_AUTH_EXPIRATION', 'expires'))
+        ('password', 'password'),
     ]
     
     def get_user_id(self, details, response):
@@ -73,45 +83,44 @@ class EmailBackend(SocialAuthBackend):
         except KeyError:
             raise AuthFailed(self, 'Email not defined in auth process')
     
+        
     def extra_data(self, user, uid, response, details):
-        """Return default blank user extra data"""
-        data={}
-        if response.get('password'):
-            data.update({'password':response['password']})
+        """Return access_token and extra defined names to store in
+        extra_data field"""
+        data = {}
+        name = self.name.replace('-', '_').upper()
+        names = (self.EXTRA_DATA or []) + setting(name + '_EXTRA_DATA', [])
+        
             
+        for entry in names:
+            if len(entry) == 2:
+                (name, alias), discard = entry, False
+            elif len(entry) == 3:
+                name, alias, discard = entry
+            elif len(entry) == 1:
+                name = alias = entry
+            else:  # ???
+                continue
+
+            value = response.get(name)
+            if discard and not value:
+                continue
+            data[alias] = value
         return data
     
-    def get_user_details(self, response):
-        """Return user details from Github account"""
-        return {USERNAME: response.get('login'),
-                'email': response.get('email') or '',
-                'first_name': response.get('name')}
-
-
-# this stores user password to user object
-# this should be decoupled from here to application.. 
-def new_users_handler(sender, user, response, details, **kwargs):
-    user.set_password(response['passwd'])
-    user.first_name= response.get('first_name','Anon')
-    user.last_name=  response.get('last_name','Ymous') 
-    user.save()
-    profile = user.get_profile()
-    profile.gender = response.get('gender','a')
-    profile.picture_link= random_face_url(profile.gender)
-    if response.get('hometown','') != '':
-        profile.hometown = response.get('hometown','')
     
-    profile.save()
-    try:
-        Nonce.objects.get(server_url=user.email).delete()
-    except Nonce.DoesNotExist:
-        pass
-    return True
+    def get_user_details(self, response):
+        """Return details from responce"""
+        
+        data = {USERNAME: response.get('login'),
+                'email': response.get('email','') ,
+                'first_name': response.get('first_name',''),
+                'last_name': response.get('last_name',''),
+                'password': response.get('password',''),
+                
+                }
+        return data
 
-## register signal only if EmailBackend is activated
-backends = setting('AUTHENTICATION_BACKENDS',{})
-if 'social_auth.backends.contrib.email.EmailBackend' in backends:
-    socialauth_registered.connect(new_users_handler, sender=EmailBackend)
     
 class SocialAuthEmailForm(Form):
     social_auth_email = EmailField(max_length=50)
@@ -173,7 +182,7 @@ def EmailAuthPassword(req):
         # continue with complete details
         # save aditional info for later use
         for field in req.POST:
-            if field is not 'csrfmiddlewaretoken':
+            if field in EMAIL_AUTH_FIELDS:
                 req.session['social_auth_email_'+str(field)]= req.POST[field]
         
         return redirect(url)
@@ -248,7 +257,6 @@ def EmailAuthView(req):
 
     return render(req,EMAIL_VIEW_TEMPLATE,context)
 
-EMAIL_AUTH_FIELDS =['passwd' ,'first_name','last_name','gender']
 
 class EmailAuth(BaseAuth):
     """E-mail Auth mechanism"""
@@ -257,7 +265,7 @@ class EmailAuth(BaseAuth):
     def auth_html(self,req, *args, **kwargs):
         for field in EMAIL_AUTH_FIELDS:
             try: # clear previous try
-                del req.session['social_auth_email'+field]
+                del req.session['social_auth_email_'+field]
             except:
                 pass  
         return EmailAuthView(req, *args, **kwargs)
@@ -284,27 +292,21 @@ class EmailAuth(BaseAuth):
             return EmailAuthPassword(req)
               
         if self.data.get('with_passwd'):
-            self.data.get('with_passwd')
-            data = {'email': req.session.get('social_auth_email_email'),
-                    'passwd': req.session.get('social_auth_email_passwd'),
-                    'first_name': req.session.get('social_auth_email_first_name','Ano'),
-                    'last_name': req.session.get('social_auth_email_last_name','Nymous'),
-                    'gender': req.session.get('social_auth_email_gender', 'a'),
-                    }
-        else:   
-    
-            data = {'email': item.server_url,
-                    'passwd': req.session.get('social_auth_email_passwd'),
-                    'first_name': req.session.get('social_auth_email_first_name','Ano'),
-                    'last_name': req.session.get('social_auth_email_last_name','Nymous'),
-                    'gender': req.session.get('social_auth_email_gender', 'a'),
-                    'hometown': req.session.get('social_auth_email_hometown', ''),
-                    }
+            social_data = UserSocialAuth.objects.filter(uid=req.session.get('social_auth_email_email'))[0]
             
-            for keys,value in MUNICIPALITY_CHOICES:
-               if keys == data['hometown']:
-                   data['hometown'] = value
-                   break
+            data = {'email': social_data.user.email,
+                    }
+            ## append other data 
+            data.update(social_data.extra_data)
+            
+        else:
+            data = {'email': item.server_url,
+                    'password': create_password(req.session.get('social_auth_email_passwd')),
+                    }
+            # copy all gathered data from session to responce 
+            for (name, value) in req.session.iteritems():
+                if name.startswith('social_auth_email_'):
+                    data.update({name[18:]:value})
                    
             if data is not None: #there cannot be error, left here for reference
                 if 'error' in data:
