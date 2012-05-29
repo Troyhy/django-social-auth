@@ -123,7 +123,7 @@ class EmailBackend(SocialAuthBackend):
 
     
 class SocialAuthEmailForm(Form):
-    social_auth_email = EmailField(max_length=50)
+    social_auth_email = EmailField(label=u'Sähköpostiosoite',max_length=50)
     social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False), required=False) 
 
 class SocialAuthNewEmailForm(Form):
@@ -297,7 +297,8 @@ class EmailAuth(BaseAuth):
             data = {'email': social_data.user.email,
                     }
             ## append other data 
-            data.update(social_data.extra_data)
+            if social_data.extra_data:
+                data.update(social_data.extra_data)
             
         else:
             data = {'email': item.server_url,
