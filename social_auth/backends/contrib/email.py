@@ -139,6 +139,18 @@ class SocialAuthNewEmailForm(Form):
         else:
             raise ValidationError(u'Sähköpostiosoite on jo käytössä, '
                                   u'Kirjaudu sisään käyttämällä salasanaa')
+
+class SocialAuthRecoverEmailForm(Form):
+    social_auth_email = EmailField(label=u'Sähköpostiosoite', max_length=50)
+    def clean_social_auth_email(self):
+        try:
+            User.objects.get(email=self.cleaned_data['social_auth_email'])
+        except User.DoesNotExist:
+             raise ValidationError(u'Sähköpostiosoitetta ei tunnistettu')
+        else:
+            return self.cleaned_data['social_auth_email']
+
+
 GENDER = (
     ('m', 'Mies'),
     ('f', 'Nainen'),
@@ -149,15 +161,15 @@ GENDER = (
 from django.contrib.localflavor.fi.forms import FIMunicipalitySelect
 from django.contrib.localflavor.fi.fi_municipalities import MUNICIPALITY_CHOICES
 MUNICIPALITY_EMPTY = [('','Valitse Paikkakunta')] +list( MUNICIPALITY_CHOICES)
+
 class SocialAuthAskPasswordForm(Form):
     first_name = CharField(label=u'Etunimi', max_length=20)
     last_name = CharField(label=u'Sukunimi', max_length=30)
     gender = ChoiceField(label=u'Sukupuoli', choices=GENDER)
     hometown = ChoiceField(label=u'Paikkakunta', choices=MUNICIPALITY_EMPTY, required=False )
-   
-    
+
     social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False)) 
-    social_auth_passwd2 = CharField(label=u'Salasana2',widget=PasswordInput(render_value=False)) 
+    social_auth_passwd2 = CharField(label=u'... uudestaan',widget=PasswordInput(render_value=False)) 
     
     def clean(self):
         cleaned_data = super(SocialAuthAskPasswordForm, self).clean()
@@ -172,7 +184,25 @@ class SocialAuthAskPasswordForm(Form):
             except:
                 pass
         return cleaned_data  
+
+class SocialAuthRecoverPasswordForm(Form):
+    social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False)) 
+    social_auth_passwd2 = CharField(label=u'... uudestaan',widget=PasswordInput(render_value=False)) 
     
+    def clean(self):
+        cleaned_data = super(SocialAuthRecoverPasswordForm, self).clean()
+        passwd1 = cleaned_data.get('social_auth_passwd')
+        passwd2 = cleaned_data.get('social_auth_passwd2')
+        
+        if passwd1 != passwd2:
+            msg = u"Salasanakentät eivät täsmää!"
+            self._errors["social_auth_passwd2"] = self.error_class([msg])
+            try:
+                del cleaned_data['social_auth_passwd2']
+            except:
+                pass
+        return cleaned_data 
+
 def EmailAuthPassword(req):
     form = SocialAuthAskPasswordForm(req.POST or None)
     context = {}
@@ -191,12 +221,33 @@ def EmailAuthPassword(req):
                     'ask_password':True})
     return render(req,EMAIL_VIEW_TEMPLATE,context)
 
+
+def EmailAuthRecoverPassword(req):
+    form = SocialAuthRecoverPasswordForm(req.POST or None)
+    context = {}
+    if form.is_valid():
+        req.session['social_auth_email_passwd'] = form.cleaned_data['social_auth_passwd']
+        url = reverse('socialauth_complete',kwargs={'backend':'email'})+'?'+urlencode(req.GET)
+        
+        return redirect(url)
+    
+    context.update({'form':form,
+                    'ask_password':True})
+    return render(req,EMAIL_VIEW_TEMPLATE,context)
+
 def EmailAuthView(req):    
     context = {}
-    create_new_account = 'create_new_account' in req.GET 
-    context.update({'create_new_account':create_new_account})
+    create_new_account = 'create_new_account' in req.GET
+    recover_password = 'recover_password' in req.GET
+    item = None
     
-    if create_new_account:
+    context.update({'create_new_account':create_new_account,
+                    'recover_password': recover_password,
+                    })
+    
+    if recover_password: 
+        form = SocialAuthRecoverEmailForm(req.POST or None)
+    elif create_new_account:
         form = SocialAuthNewEmailForm(req.POST or None)
     else:
         form = SocialAuthEmailForm(req.POST or None)
@@ -208,7 +259,7 @@ def EmailAuthView(req):
             passwd = form.cleaned_data['social_auth_passwd']
        
         ## password given, try to match against user password
-        if not create_new_account:
+        if not (create_new_account or recover_password):
             try:
                 user = User.objects.get(email=email)
             except User.DoesNotExist:
@@ -229,7 +280,7 @@ def EmailAuthView(req):
             req.session['social_auth_email_email'] = email
             return redirect(url)
         
-        else:     
+        elif create_new_account:     
             (item, created) = Nonce.objects.get_or_create(server_url=email,\
                                                           defaults={'timestamp': int(time())})
             if item.timestamp - int(time()) > (24 * 60 *60):
@@ -240,17 +291,29 @@ def EmailAuthView(req):
                 item.timestamp = int(time())
                 item.save()
                 
-            context.update({'email':email})   
-            args = {'token':item.salt}
-            url = 'http://%s%s'%( Site.objects.get_current(),\
-                                  reverse('socialauth_complete',\
-                                          kwargs={'backend':'email'})+'?'+urlencode(args))
             
-            rendered = render_to_string(EMAIL_TEMPLATE, { 'auth_url': url })
-            subject =  render_to_string(EMAIL_SUBJECT_TEMPLATE, { 'auth_url': url })
-            send_mail(subject, rendered , EMAIL_FROM,[email], fail_silently=False)
-            if DEBUG:
-                print('url:%s'%url)
+        elif recover_password:
+            (item, created) = Nonce.objects.get_or_create(server_url=email,\
+                                                          defaults={'timestamp': int(time())})
+            if item.timestamp - int(time()) > (24 * 60 *60):
+                created = True; # renew this token
+            if created:
+                real_salt=setting('SECRET_KEY','add more salt')
+                item.salt = '!!!:' + md5(real_salt + email +str(int(time()))).hexdigest()
+                item.timestamp = int(time())
+                item.save()
+
+        context.update({'email':email})   
+        args = {'token':item.salt}
+        url = 'http://%s%s'%( Site.objects.get_current(),\
+                              reverse('socialauth_complete',\
+                                      kwargs={'backend':'email'})+'?'+urlencode(args))
+        
+        rendered = render_to_string(EMAIL_TEMPLATE, { 'auth_url': url })
+        subject =  render_to_string(EMAIL_SUBJECT_TEMPLATE, { 'auth_url': url })
+        send_mail(subject, rendered , EMAIL_FROM,[email], fail_silently=False)
+        if DEBUG:
+            print('url:%s'%url)
 
     else:
         context.update({'form':form})
@@ -274,16 +337,34 @@ class EmailAuth(BaseAuth):
         """Returns user, might be logged in"""
         req = kwargs['request']
         item = None
+        request_new_password = False
+        with_passwd = self.data.get('with_passwd',False)
         
-        if 'token' not in self.data and 'with_passwd' not in self.data:
+        if 'token' not in self.data and not with_passwd:
             error = self.data.get('error') or 'unknown error'
             raise AuthFailed(self, error)
         
         if 'token' in self.data:
             try:
                 item = Nonce.objects.get(salt=self.data['token'])
+                if item.salt.startswith('!!!:'):
+                    request_new_password = True
             except Nonce.DoesNotExist as e:
                 raise AuthFailed(self, e)
+        
+        if request_new_password:
+            if not req.session.get('social_auth_email_passwd'):
+                return EmailAuthRecoverPassword(req)
+            social_data = UserSocialAuth.objects.filter(uid=item.server_url)[0]
+            user = social_data.user
+            user.password = create_password(req.session.get('social_auth_email_passwd'))  
+            user.save()
+            
+            # login user with new password
+            req.session['social_auth_email_email'] = item.server_url
+            with_passwd = True
+            item.delete()
+
             
         if not req.session.get('social_auth_email_passwd'):
             # password not in session, request new password
@@ -291,7 +372,7 @@ class EmailAuth(BaseAuth):
             req=kwargs['request']
             return EmailAuthPassword(req)
               
-        if self.data.get('with_passwd'):
+        if with_passwd:
             social_data = UserSocialAuth.objects.filter(uid=req.session.get('social_auth_email_email'))[0]
             
             data = {'email': social_data.user.email,
