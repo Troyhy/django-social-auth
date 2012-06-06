@@ -320,17 +320,20 @@ def EmailAuthView(req):
 
     return render(req,EMAIL_VIEW_TEMPLATE,context)
 
+def clean_session(req):
+    pass
+    for field in EMAIL_AUTH_FIELDS:
+            try: # clear previous try
+                del req.session['social_auth_email_'+field]
+            except:
+                pass
 
 class EmailAuth(BaseAuth):
     """E-mail Auth mechanism"""
     AUTH_BACKEND = EmailBackend
     
     def auth_html(self,req, *args, **kwargs):
-        for field in EMAIL_AUTH_FIELDS:
-            try: # clear previous try
-                del req.session['social_auth_email_'+field]
-            except:
-                pass  
+        clean_session(req)
         return EmailAuthView(req, *args, **kwargs)
 
     def auth_complete(self, *args, **kwargs):
@@ -400,6 +403,8 @@ class EmailAuth(BaseAuth):
             'response': data,
             self.AUTH_BACKEND.name: True
         })
+        
+        clean_session(req)
         return authenticate(*args, **kwargs)
 
     def user_data(self, item):
