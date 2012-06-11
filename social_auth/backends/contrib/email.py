@@ -51,7 +51,7 @@ EMAIL_SUBJECT_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_EMAIL_SUBJECT_TEMPLATE','')
 EMAIL_FROM = setting('SOCIAL_AUTH_TOKEN_EMAIL_FROM','noreply@example.com') 
 EMAIL_VIEW_TEMPLATE = setting('SOCIAL_AUTH_TOKEN_TEMPLATE','')
 
-EMAIL_AUTH_FIELDS =['passwd', 'email' ,'first_name','last_name','gender','hometown']
+EMAIL_AUTH_FIELDS =['passwd', 'email' ,'first_name','last_name','gender','hometown','age']
 
 
 DEBUG = setting('DEBUG','False')
@@ -117,7 +117,6 @@ class EmailBackend(SocialAuthBackend):
                 'first_name': response.get('first_name',''),
                 'last_name': response.get('last_name',''),
                 'password': response.get('password',''),
-                
                 }
         return data
 
@@ -129,8 +128,6 @@ class SocialAuthEmailForm(Form):
 class SocialAuthNewEmailForm(Form):
     social_auth_email = EmailField(label=u'Sähköpostiosoite', max_length=50)
     
-     # possible other intresting parts here
-
     def clean_social_auth_email(self):
         try:
             User.objects.get(email=self.cleaned_data['social_auth_email'])
@@ -161,13 +158,15 @@ GENDER = (
 from django.contrib.localflavor.fi.forms import FIMunicipalitySelect
 from django.contrib.localflavor.fi.fi_municipalities import MUNICIPALITY_CHOICES
 MUNICIPALITY_EMPTY = [('','Valitse Paikkakunta')] +list( MUNICIPALITY_CHOICES)
+YEARS= ((a,a) for a in range(1900,2012))
+BIRTH_YEARS = [('',u'Valitse Syntymävuosi')] + list(YEARS)
 
 class SocialAuthAskPasswordForm(Form):
     first_name = CharField(label=u'Etunimi', max_length=20)
     last_name = CharField(label=u'Sukunimi', max_length=30)
     gender = ChoiceField(label=u'Sukupuoli', choices=GENDER)
     hometown = ChoiceField(label=u'Paikkakunta', choices=MUNICIPALITY_EMPTY, required=False )
-
+    age = ChoiceField(label=u'Syntymävuosi', choices=BIRTH_YEARS, required=False)
     social_auth_passwd = CharField(label=u'Salasana',widget=PasswordInput(render_value=False)) 
     social_auth_passwd2 = CharField(label=u'... uudestaan',widget=PasswordInput(render_value=False)) 
     
